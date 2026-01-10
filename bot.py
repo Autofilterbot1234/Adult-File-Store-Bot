@@ -51,7 +51,7 @@ from handlers.save_media import (
 # If they are not in Config, you might need to define them manually or import them.
 FORCE_SUB_CHANNEL = getattr(Config, 'FORCE_SUB_CHANNEL', None)
 ADMINS = getattr(Config, 'ADMINS', [])
-AUTO_DELETE_TIME = getattr(Config, 'AUTO_DELETE_TIME', 3600)
+AUTO_DELETE_TIME = getattr(Config, 'AUTO_DELETE_TIME', 10800)
 AUTO_DEL_SUCCESS_MSG = getattr(Config, 'AUTO_DEL_SUCCESS_MSG', "File deleted successfully.")
 
 async def is_subscribed(filter, client, update):
