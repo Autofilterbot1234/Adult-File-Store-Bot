@@ -28,7 +28,7 @@ from pyrogram.types import (
     Message
 )
 
-# Config imports (Ensure these exist in your config.py or configs.py)
+# Config imports
 from configs import Config
 from handlers.database import db
 from handlers.add_user_to_db import add_user_to_database
@@ -45,13 +45,10 @@ from handlers.save_media import (
     save_batch_media_in_channel
 )
 
-# --- Helper Functions & Variables (Moved from inside the button logic) ---
+# --- Helper Functions & Variables ---
 
-# Note: These variables need to be in your config file or defined here to avoid errors.
-# If they are not in Config, you might need to define them manually or import them.
 FORCE_SUB_CHANNEL = getattr(Config, 'FORCE_SUB_CHANNEL', None)
 ADMINS = getattr(Config, 'ADMINS', [])
-AUTO_DELETE_TIME = getattr(Config, 'AUTO_DELETE_TIME', 10800)
 AUTO_DEL_SUCCESS_MSG = getattr(Config, 'AUTO_DEL_SUCCESS_MSG', "File deleted successfully.")
 
 async def is_subscribed(filter, client, update):
@@ -114,7 +111,7 @@ async def get_message_id(client, message):
     elif message.forward_sender_name:
         return 0
     elif message.text:
-        pattern = "https://t.me/(?:c/)?(.*)/(\d+)"
+        pattern = r"https://t.me/(?:c/)?(.*)/(\d+)"
         matches = re.match(pattern, message.text)
         if not matches:
             return 0
@@ -150,18 +147,29 @@ def get_readable_time(seconds: int) -> str:
     up_time += ":".join(time_list)
     return up_time
 
+# Modified delete_file function to fetch dynamic time
 async def delete_file(messages, client, process):
-    await asyncio.sleep(AUTO_DELETE_TIME)
+    # Fetch time from DB
+    time_in_seconds = await db.get_auto_delete_time()
+    
+    if time_in_seconds == 0:
+        return # Auto delete is disabled if time is 0
+    
+    await asyncio.sleep(time_in_seconds)
+    
     for msg in messages:
         try:
             await client.delete_messages(chat_id=msg.chat.id, message_ids=[msg.id])
         except Exception as e:
-            await asyncio.sleep(e.x)
+            # await asyncio.sleep(e.x)
             print(f"The attempt to delete the media {msg.id} was unsuccessful: {e}")
 
-    await process.edit_text(AUTO_DEL_SUCCESS_MSG)
+    # Only edit text if process message still exists (Optional check)
+    try:
+        await process.edit_text(AUTO_DEL_SUCCESS_MSG)
+    except:
+        pass
 
-# This was the line causing the error, now fixed and placed correctly
 subscribed = filters.create(is_subscribed)
 
 # --- End of Helper Functions ---
@@ -176,11 +184,54 @@ Bot = Client(
     api_hash=Config.API_HASH
 )
 
-
 @Bot.on_message(filters.private)
 async def _(bot: Client, cmd: Message):
     await handle_user_status(bot, cmd)
 
+# --------- NEW COMMANDS (START) ---------
+
+@Bot.on_message(filters.command("settings") & filters.user(Config.BOT_OWNER))
+async def settings(bot, message):
+    protect = await db.get_protect_content()
+    auto_del = await db.get_auto_delete_time()
+    
+    status_text = f"⚙️ **Bot Settings**\n\n" \
+                  f"🛡 **Protect Content:** `{'ON' if protect else 'OFF'}`\n" \
+                  f"⏳ **Auto Delete Time:** `{auto_del} seconds` (0 means OFF)\n\n" \
+                  f"Commands:\n" \
+                  f"`/protect on` or `/protect off`\n" \
+                  f"`/autodelete 60` (set time in seconds)"
+    
+    await message.reply_text(status_text, quote=True)
+
+@Bot.on_message(filters.command("protect") & filters.user(Config.BOT_OWNER))
+async def protect_toggle(bot, message):
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: `/protect on` or `/protect off`")
+    
+    status = message.command[1].lower()
+    if status == "on":
+        await db.set_protect_content(True)
+        await message.reply_text("🔒 **Protect Content Enabled!**\nUsers CANNOT forward or save files.")
+    elif status == "off":
+        await db.set_protect_content(False)
+        await message.reply_text("🔓 **Protect Content Disabled!**\nUsers CAN forward and save files.")
+    else:
+        await message.reply_text("Invalid option. Use `on` or `off`.")
+
+@Bot.on_message(filters.command("autodelete") & filters.user(Config.BOT_OWNER))
+async def auto_delete_set(bot, message):
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: `/autodelete 60` (Time in seconds)\nSet 0 to disable.")
+    
+    try:
+        time_val = int(message.command[1])
+        await db.set_auto_delete_time(time_val)
+        await message.reply_text(f"⏳ **Auto Delete Timer Set to:** `{time_val} seconds`.")
+    except ValueError:
+        await message.reply_text("Please provide a valid number.")
+
+# --------- NEW COMMANDS (END) ---------
 
 @Bot.on_message(filters.command("start") & filters.private)
 async def start(bot: Client, cmd: Message):
@@ -237,7 +288,6 @@ async def start(bot: Client, cmd: Message):
                 await send_media_and_reply(bot, user_id=cmd.from_user.id, file_id=int(message_ids[i]))
         except Exception as err:
             await cmd.reply_text(f"Something went wrong!\n\n**Error:** `{err}`")
-
 
 @Bot.on_message((filters.document | filters.video | filters.audio | filters.photo) & ~filters.chat(Config.DB_CHANNEL))
 async def main(bot: Client, message: Message):
@@ -306,11 +356,9 @@ async def main(bot: Client, message: Message):
                 disable_web_page_preview=True
             )
 
-
 @Bot.on_message(filters.private & filters.command("broadcast") & filters.user(Config.BOT_OWNER) & filters.reply)
 async def broadcast_handler_open(_, m: Message):
     await main_broadcast_handler(m, db)
-
 
 @Bot.on_message(filters.private & filters.command("status") & filters.user(Config.BOT_OWNER))
 async def sts(_, m: Message):
@@ -319,7 +367,6 @@ async def sts(_, m: Message):
         text=f"**Total Users in DB:** `{total_users}`",
         quote=True
     )
-
 
 @Bot.on_message(filters.private & filters.command("ban_user") & filters.user(Config.BOT_OWNER))
 async def ban(c: Client, m: Message):
@@ -364,7 +411,6 @@ async def ban(c: Client, m: Message):
             quote=True
         )
 
-
 @Bot.on_message(filters.private & filters.command("unban_user") & filters.user(Config.BOT_OWNER))
 async def unban(c: Client, m: Message):
 
@@ -403,7 +449,6 @@ async def unban(c: Client, m: Message):
             quote=True
         )
 
-
 @Bot.on_message(filters.private & filters.command("banned_users") & filters.user(Config.BOT_OWNER))
 async def _banned_users(_, m: Message):
     
@@ -428,12 +473,10 @@ async def _banned_users(_, m: Message):
         return
     await m.reply_text(reply_text, True)
 
-
 @Bot.on_message(filters.private & filters.command("clear_batch"))
 async def clear_user_batch(bot: Client, m: Message):
     MediaList[f"{str(m.from_user.id)}"] = []
     await m.reply_text("Cleared your batch files successfully!")
-
 
 @Bot.on_callback_query()
 async def button(bot: Client, cmd: CallbackQuery):
@@ -534,7 +577,6 @@ async def button(bot: Client, cmd: CallbackQuery):
                 )
                 return
         
-        # Fixed Button Structure here
         await cmd.message.edit(
             text=Config.HOME_TEXT.format(cmd.message.chat.first_name, cmd.message.chat.id),
             disable_web_page_preview=True,
