@@ -13,6 +13,37 @@ class Database:
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         self.col = self.db.users
+        self.config_col = self.db.config  # সেটিংস সেভ করার জন্য নতুন কালেকশন
+
+    # -------- New Settings Functions (Start) --------
+    
+    # ফরওয়ার্ড প্রোটেকশন চেক করা
+    async def get_protect_content(self):
+        config = await self.config_col.find_one({'id': 'bot_settings'})
+        return config.get('protect_content', False) if config else False
+
+    # ফরওয়ার্ড প্রোটেকশন সেট করা (On/Off)
+    async def set_protect_content(self, value: bool):
+        await self.config_col.update_one(
+            {'id': 'bot_settings'}, 
+            {'$set': {'protect_content': value}}, 
+            upsert=True
+        )
+
+    # অটো ডিলিট টাইমার চেক করা (সেকেন্ডে)
+    async def get_auto_delete_time(self):
+        config = await self.config_col.find_one({'id': 'bot_settings'})
+        return config.get('auto_delete_time', 0) if config else 0
+
+    # অটো ডিলিট টাইমার সেট করা
+    async def set_auto_delete_time(self, time_in_seconds: int):
+        await self.config_col.update_one(
+            {'id': 'bot_settings'},
+            {'$set': {'auto_delete_time': time_in_seconds}},
+            upsert=True
+        )
+
+    # -------- New Settings Functions (End) --------
 
     def new_user(self, id):
         return dict(
